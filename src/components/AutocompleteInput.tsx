@@ -1,6 +1,6 @@
 "use client"
 
-import type React from "react"
+import React from "react"
 import { useState, useCallback, useRef, useEffect } from "react"
 import { io } from "socket.io-client"
 import { Loader2 } from "lucide-react"

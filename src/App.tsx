@@ -1,7 +1,6 @@
 "use client"
 
-import type React from "react"
-import { useState, useEffect } from "react"
+import React, { useState, useEffect } from "react"
 import { Plus, CalendarClock } from "lucide-react"
 import CandidateFormContainer from "./components/CandidateFormContainer"
 import CandidateTimeline from "./components/CandidateTimeline"
@@ -36,11 +35,9 @@ export default function App() {
   useWebSocketAutocomplete(setFormData)
   useInterviewNotifications(candidates)
 
-  // Auto-start tour for new users
   useEffect(() => {
     const hasSeenTour = hasCompletedTour()
     if (!hasSeenTour && candidates.length === 0) {
-      // Delay the tour start to ensure DOM is ready
       const timer = setTimeout(() => {
         startMainTour()
       }, 1500)
@@ -280,7 +277,7 @@ export default function App() {
                   />
                 </div>
               ) : (
-                <div className="space-y-4 bg-red">
+                <div className="space-y-4">
                   <CandidateTimeline
                     candidates={candidates}
                     onView={setViewingCandidate}
