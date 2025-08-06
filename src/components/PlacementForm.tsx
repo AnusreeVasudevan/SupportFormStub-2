@@ -1,8 +1,9 @@
-import React, { useState, useEffect, ChangeEvent, FormEvent } from "react";
+import React, { useState, useEffect, ChangeEvent, FormEvent, useRef } from "react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { FormSection } from "./FormSection";
 import type { PlacementFormData } from "../types";
+import { useToast } from "../hooks/useToast";
 
 
 const fieldLabels: Record<string, string> = {
@@ -99,7 +100,7 @@ const groupedSections: {
   },
 ];
 
-const POForm: React.FC = () => {
+const PlacementForm: React.FC = () => {
   const initialState: PlacementFormData = {
     id: "",
     candidateName: "",
@@ -148,18 +149,20 @@ const POForm: React.FC = () => {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showPopup, setShowPopup] = useState(false);
   const [submittedData, setSubmittedData] = useState<PlacementFormData | null>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const { showToast, ToastContainer } = useToast();
 
-  const generatePOID = () => {
+  const generatePlacementOfferId = () => {
     const today = new Date();
     const yyyy = today.getFullYear();
     const mm = String(today.getMonth() + 1).padStart(2, "0");
     const dd = String(today.getDate()).padStart(2, "0");
-    const seq = Math.floor(100 + Math.random() * 900);
+    const seq = crypto.randomUUID().split("-")[0];
     return `PO-${yyyy}${mm}${dd}-${seq}`;
   };
 
   useEffect(() => {
-    const id = generatePOID();
+    const id = generatePlacementOfferId();
     setData((d) => ({ ...d, placementOfferID: id, id }));
   }, []);
 
@@ -169,47 +172,67 @@ const POForm: React.FC = () => {
       .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
       .join(" ");
 
-  const validateField = (name: string, value: string): string => {
+  const validateField = (name: string, value: string | number): string => {
     let error = "";
-    if (name === "candidateName" && !value.trim()) error = "Name is required.";
-    if (name === "sstVivza" && !value) error = "Please select SST or Vivza.";
-    if (name === "location" && !value) error = "Please select a location.";
-    if (["poCountAMD", "poCountGGR", "poCountLKO"].includes(name) && value && Number(value) < 0)
+    if (name === "candidateName" && typeof value === "string" && !value.trim())
+      error = "Name is required.";
+    if (name === "sstVivza" && typeof value === "string" && !value)
+      error = "Please select SST or Vivza.";
+    if (name === "location" && typeof value === "string" && !value)
+      error = "Please select a location.";
+    if (["poCountAMD", "poCountGGR", "poCountLKO"].includes(name) && value !== "" && Number(value) < 0)
       error = "PO count cannot be negative.";
-    if (name === "personalPhone") {
+    if (name === "personalPhone" && typeof value === "string") {
       if (value && (!/^\d*$/.test(value) || value.length > 10)) {
         error = "Phone must be numeric and max 10 digits.";
       } else if (value.length > 0 && value.length < 10) {
         error = "Phone number must be 10 digits.";
       }
     }
-    if (name === "email" && value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))
+    if (name === "email" && typeof value === "string" && value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))
       error = "Invalid email format.";
-    if (name === "vendorEmail" && value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))
+    if (name === "vendorEmail" && typeof value === "string" && value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))
       error = "Invalid vendor email format.";
-    if (name === "rate" && value && (isNaN(Number(value)) || Number(value) < 0))
+    if (name === "rate" && value !== "" && (Number.isNaN(Number(value)) || Number(value) < 0))
       error = "Rate must be a non-negative number.";
-    if (name === "agreementPercent" && value && (Number(value) < 0 || Number(value) > 100))
+    if (name === "agreementPercent" && value !== "" && (Number(value) < 0 || Number(value) > 100))
       error = "Agreement % must be between 0 and 100.";
-    if (name === "agreementMonths" && value && Number(value) < 0)
+    if (name === "agreementMonths" && value !== "" && Number(value) < 0)
       error = "Agreement months must be non-negative.";
     return error;
   };
 
-  const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+  const numericFields: (keyof PlacementFormData)[] = [
+    "poCountAMD",
+    "poCountGGR",
+    "poCountLKO",
+    "rate",
+    "agreementPercent",
+    "agreementMonths",
+  ];
+
+  const handleChange = (
+    e: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
+  ) => {
     const { name, value } = e.target;
-    const newValue = name === "candidateName" ? formatCandidateName(value) : value;
+    const key = name as keyof PlacementFormData;
+    const formattedValue =
+      key === "candidateName"
+        ? formatCandidateName(value)
+        : numericFields.includes(key)
+        ? (value === "" ? "" : Number(value))
+        : value;
 
     setData((prev) => {
-      const updated = { ...prev, [name]: newValue };
-      const amd = parseInt(updated.poCountAMD || "0", 10);
-      const ggr = parseInt(updated.poCountGGR || "0", 10);
-      const lko = parseInt(updated.poCountLKO || "0", 10);
+      const updated = { ...prev, [key]: formattedValue } as PlacementFormData;
+      const amd = Number(updated.poCountAMD || 0);
+      const ggr = Number(updated.poCountGGR || 0);
+      const lko = Number(updated.poCountLKO || 0);
       updated.poCountTotal = amd + ggr + lko;
       return updated;
     });
 
-    setErrors((prev) => ({ ...prev, [name]: validateField(name, newValue) }));
+    setErrors((prev) => ({ ...prev, [name]: validateField(name, formattedValue) }));
   };
 
   const handleSubmit = (e: FormEvent) => {
@@ -218,7 +241,7 @@ const POForm: React.FC = () => {
 
     Object.keys(data).forEach((field) => {
       const key = field as keyof PlacementFormData;
-      const error = validateField(field, data[key] as string);
+      const error = validateField(field, data[key]);
       if (error) newErrors[field] = error;
     });
 
@@ -242,15 +265,18 @@ const POForm: React.FC = () => {
       setSubmittedData(data);
       setShowPopup(true);
       localStorage.setItem("placementOfferForm", JSON.stringify(data));
-      const id = generatePOID();
+      const id = generatePlacementOfferId();
       setData({ ...initialState, placementOfferID: id, id });
       setErrors({});
     }
   };
 
   const copyTable = async () => {
-    const table = document.querySelector('.popup-table') as HTMLTableElement | null;
-    if (!table) return;
+    const table = tableRef.current;
+    if (!table) {
+      showToast("Table not found", "error");
+      return;
+    }
 
     const excludeLabels = new Set(['Placement Offer ID', 'ID']);
 
@@ -314,18 +340,18 @@ const POForm: React.FC = () => {
       </html>
     `;
 
-  try {
-    await navigator.clipboard.write([
-      new ClipboardItem({
-        'text/plain': new Blob([text], { type: 'text/plain' }),
-        'text/html': new Blob([htmlContent], { type: 'text/html' }),
-      }),
-    ]);
-    alert('Table copied! You can paste it into Word or Google Docs.');
-  } catch (err) {
-    alert('Failed to copy table: ' + (err as Error).message);
-  }
-};
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/plain': new Blob([text], { type: 'text/plain' }),
+          'text/html': new Blob([htmlContent], { type: 'text/html' }),
+        }),
+      ]);
+      showToast('Table copied! You can paste it into Word or Google Docs.', 'success');
+    } catch (err) {
+      showToast('Failed to copy table: ' + (err as Error).message, 'error');
+    }
+  };
 
 
   const downloadPDF = () => {
@@ -481,7 +507,7 @@ const POForm: React.FC = () => {
             {renderInput("Vendor Title", "vendorTitle")}
             {renderInput("Vendor Direct", "vendorDirect")}
             {renderInput("Vendor Email", "vendorEmail")}
-            {renderInput("Rate", "rate")}
+            {renderInput("Rate", "rate", "number", false, undefined, false, "no-spinner")}
           </FormSection>
 
           {/* Dates & Status */}
@@ -516,8 +542,8 @@ const POForm: React.FC = () => {
 
           {/* Agreement */}
           <FormSection title="Agreement">
-            {renderInput("Agreement Percentage", "agreementPercent")}
-            {renderInput("Agreement Months", "agreementMonths")}
+            {renderInput("Agreement Percentage", "agreementPercent", "number", false, undefined, false, "no-spinner")}
+            {renderInput("Agreement Months", "agreementMonths", "number", false, undefined, false, "no-spinner")}
           </FormSection>
 
           {/* Misc */}
@@ -543,7 +569,7 @@ const POForm: React.FC = () => {
               {submittedData.candidateName || "Submitted Data"}
             </h2>
             <div className="overflow-auto max-h-80">
-              <table className="popup-table w-full border border-gray-700">
+              <table ref={tableRef} className="popup-table w-full border border-gray-700">
                 <tbody>
                   {tableOrder.map((item) => {
                     if (typeof item === "string") {
@@ -620,8 +646,9 @@ const POForm: React.FC = () => {
           </div>
         </div>
       )}
+      <ToastContainer />
     </div>
   );
 };
 
-export default POForm;
+export default PlacementForm;
